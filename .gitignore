@@ -1,0 +1,27 @@
+
+# Beads / Dolt files (added by bd init)
+.dolt/
+*.db
+.beads-credential-key
+.beads/proxieddb/
+
+# Gas City
+.beads/*
+!.beads/identity.toml
+**/.beads/*
+!/.beads/identity.toml
+**/.gc/
+
+# Local tooling and generated output
+node_modules/
+dist/
+*.tsbuildinfo
+.gc/
+.codex/
+**/.codex/
+
+# Visual smoke screenshots and server logs
+.artifacts/visual-smoke/
+/worktrees
+plans/
+github/
