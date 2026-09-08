@@ -28,10 +28,17 @@ export interface TilePosition {
   readonly y: number;
 }
 
+export function isInBounds(position: TilePosition): boolean {
+  return Number.isInteger(position.x)
+    && Number.isInteger(position.y)
+    && position.x >= 0
+    && position.y >= 0
+    && position.x < MAP_WIDTH
+    && position.y < MAP_HEIGHT;
+}
+
 export function tileAt(position: TilePosition): Tile | undefined {
-  if (position.x < 0 || position.y < 0 || position.x >= MAP_WIDTH || position.y >= MAP_HEIGHT) {
-    return undefined;
-  }
+  if (!isInBounds(position)) return undefined;
   return CITY_MAP[position.y][position.x] as Tile;
 }
 

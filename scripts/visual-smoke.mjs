@@ -149,6 +149,19 @@ async function assertInitialPage(page) {
   await assertPage(page, state.playerPosition === '1,1' && state.playerFacing === 'east', 'the initial minimap player marker is wrong');
 }
 
+async function assertRenderDiagnostics(page) {
+  const diagnostics = await page.evaluate(() => window.__GASGAME_DIAGNOSTICS__ ?? null);
+  await assertPage(page, diagnostics?.schema === 'gasgame.city-render-diagnostics.v1', 'city render diagnostics are missing');
+  await assertPage(page, diagnostics?.status === 'ok', `city render diagnostics report ${diagnostics?.errors?.join('; ') ?? 'an unknown error'}`);
+  await assertPage(page, diagnostics.canvas?.created && diagnostics.canvas?.context, 'the renderer canvas/context diagnostic failed');
+  await assertPage(page, ['cobble', 'brick', 'wood'].every((family) => diagnostics.textures?.assignedFamilies?.includes(family)), 'required texture families are not assigned');
+  await assertPage(page, diagnostics.textures?.created === 3 && diagnostics.textures?.cacheMisses === 3, 'procedural texture cache did not create exactly one texture per family');
+  await assertPage(page, diagnostics.roadMaterialCount > 0 && diagnostics.facadeMaterialCounts?.brick > 0 && diagnostics.facadeMaterialCounts?.wood > 0, 'road or facade material families are missing');
+  await assertPage(page, diagnostics.houseCount > 0 && diagnostics.windowMeshCount >= diagnostics.houseCount, 'houses are missing render-only windows');
+  await assertPage(page, diagnostics.floorTileCount === EXPECTED_MINIMAP_CELL_COUNT && diagnostics.floorDimensions?.minWidth === 4 && diagnostics.floorDimensions?.maxWidth === 4 && diagnostics.floorDimensions?.minDepth === 4 && diagnostics.floorDimensions?.maxDepth === 4, 'floor dimensions or count are incorrect');
+  await assertPage(page, diagnostics.decorativeObjectsRenderOnly === true, 'decorative objects are not render-only');
+}
+
 async function assertMinimapMarker(page, position, facing) {
   const marker = await page.evaluate(() => {
     const playerCell = document.querySelector('.minimap-cell.player');
@@ -323,6 +336,7 @@ async function runChecks(playwright, url, browserPath, launchedBrowser) {
   await page.waitForTimeout(350);
   await assertPage(page, pageErrors.length === 0, `the app reported a browser error: ${pageErrors.join('; ')}`);
   await assertInitialPage(page);
+  await assertRenderDiagnostics(page);
   await assertMinimapMarker(page, '1,1', 'east');
   await assertResponsiveGeometry(page, 'desktop base layout');
   await screenshot(page, 'desktop.png');
@@ -431,6 +445,7 @@ async function runChecks(playwright, url, browserPath, launchedBrowser) {
   await page.reload({ waitUntil: 'networkidle' });
   await page.waitForTimeout(350);
   await assertInitialPage(page);
+  await assertRenderDiagnostics(page);
   await assertResponsiveGeometry(page, 'narrow base layout');
   await screenshot(page, 'narrow.png');
 

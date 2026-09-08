@@ -3,6 +3,17 @@ import { CITY_MAP, MAP_HEIGHT, MAP_WIDTH, TILE_SIZE } from './game/map';
 import { START_STATE, turn, tryMove, type PlayerState } from './game/movement';
 import { isDiscovered, revealTiles, tileKey } from './game/discovery';
 import {
+  buildCityDiagnostics,
+  buildingHeightAt,
+  createBrickTexture,
+  createCityRenderPlans,
+  createCobbleTexture,
+  createWoodTexture,
+  normalizeBuildingHeight,
+  type CityRenderDiagnostics,
+  type FacadeSide,
+} from './game/cityVisuals';
+import {
   chooseStoreOption,
   closeStore,
   findStore,
@@ -47,13 +58,42 @@ sun.position.set(-20, 30, 12);
 sun.castShadow = true;
 scene.add(sun);
 
+const cobbleTexture = createCobbleTexture();
+const brickTexture = createBrickTexture();
+const woodTexture = createWoodTexture();
 const floorMaterial = new THREE.MeshStandardMaterial({ color: '#4d6572', roughness: 0.92 });
-const roadMaterial = new THREE.MeshStandardMaterial({ color: '#1e2b35', roughness: 0.98 });
-const buildingMaterial = new THREE.MeshStandardMaterial({ color: '#8b493b', roughness: 0.8 });
-const roofMaterial = new THREE.MeshStandardMaterial({ color: '#c5794c', roughness: 0.75 });
+const roadMaterial = new THREE.MeshStandardMaterial({ map: cobbleTexture, color: '#a8b4ad', roughness: 0.98 });
+const brickMaterial = new THREE.MeshStandardMaterial({ map: brickTexture, color: '#a95848', roughness: 0.8 });
+const woodMaterial = new THREE.MeshStandardMaterial({ map: woodTexture, color: '#916347', roughness: 0.84 });
+const roofMaterials = [
+  new THREE.MeshStandardMaterial({ color: '#c5794c', roughness: 0.75 }),
+  new THREE.MeshStandardMaterial({ color: '#a95a48', roughness: 0.78 }),
+];
 const markerMaterial = new THREE.MeshStandardMaterial({ color: '#ffcf4a', emissive: '#9b5710', emissiveIntensity: 0.8 });
 const doorMaterial = new THREE.MeshStandardMaterial({ color: '#3b1e2c', emissive: '#7d3d46', emissiveIntensity: 0.7, roughness: 0.75 });
 const doorHandleMaterial = new THREE.MeshStandardMaterial({ color: '#ffcf4a', emissive: '#9b5710', emissiveIntensity: 0.8 });
+const windowFrameMaterial = new THREE.MeshStandardMaterial({ color: '#241d24', roughness: 0.72 });
+const windowGlassMaterial = new THREE.MeshStandardMaterial({ color: '#f2bd68', emissive: '#9b5710', emissiveIntensity: 0.5, roughness: 0.42 });
+const windowFrameGeometries = {
+  northSouth: new THREE.BoxGeometry(0.58, 0.68, 0.1),
+  eastWest: new THREE.BoxGeometry(0.1, 0.68, 0.58),
+};
+const windowGlassGeometries = {
+  northSouth: new THREE.BoxGeometry(0.4, 0.48, 0.04),
+  eastWest: new THREE.BoxGeometry(0.04, 0.48, 0.4),
+};
+const cityRenderObjects: THREE.Object3D[] = [];
+const floorObjects: THREE.Mesh[] = [];
+const houseObjects: THREE.Mesh[] = [];
+const windowObjects: THREE.Mesh[] = [];
+
+function addCityObject<T extends THREE.Object3D>(object: T, role: string): T {
+  object.userData.renderOnly = true;
+  object.userData.cityRenderRole = role;
+  cityRenderObjects.push(object);
+  scene.add(object);
+  return object;
+}
 
 function worldPosition(x: number, y: number, height = 0): THREE.Vector3 {
   return new THREE.Vector3(
@@ -63,28 +103,64 @@ function worldPosition(x: number, y: number, height = 0): THREE.Vector3 {
   );
 }
 
+const doorSides = new Map<string, FacadeSide>();
+for (const store of STORES) {
+  const doorSide: FacadeSide = store.doorFacing === 'north' ? 'south' : store.doorFacing === 'south' ? 'north' : store.doorFacing === 'east' ? 'west' : 'east';
+  doorSides.set(tileKey(store.buildingTile), doorSide);
+}
+const renderPlans = createCityRenderPlans(doorSides);
+const planByTile = new Map(renderPlans.map((plan) => [tileKey({ x: plan.x, y: plan.y }), plan]));
 for (let y = 0; y < MAP_HEIGHT; y += 1) {
   for (let x = 0; x < MAP_WIDTH; x += 1) {
     const position = worldPosition(x, y);
-    const isStreet = CITY_MAP[y][x] === '.';
-    const tile = new THREE.Mesh(new THREE.BoxGeometry(TILE_SIZE * 0.98, 0.16, TILE_SIZE * 0.98), isStreet ? roadMaterial : floorMaterial);
+    const plan = planByTile.get(tileKey({ x, y }));
+    if (!plan) throw new Error(`Missing render plan for tile (${x}, ${y})`);
+    const isStreet = plan.tile === '.';
+    const tile = new THREE.Mesh(new THREE.BoxGeometry(TILE_SIZE, 0.16, TILE_SIZE), isStreet ? roadMaterial : floorMaterial);
     tile.position.copy(position);
     tile.position.y = -0.1;
     tile.receiveShadow = true;
-    scene.add(tile);
+    floorObjects.push(addCityObject(tile, 'floor'));
 
     if (!isStreet) {
-      const height = 2.4 + ((x * 7 + y * 11) % 4) * 0.65;
-      const building = new THREE.Mesh(new THREE.BoxGeometry(TILE_SIZE * 0.82, height, TILE_SIZE * 0.82), buildingMaterial);
+      const height = normalizeBuildingHeight(buildingHeightAt(x, y), { x, y });
+      const facadeMaterial = plan.facade?.family === 'brick' ? brickMaterial : woodMaterial;
+      const building = new THREE.Mesh(new THREE.BoxGeometry(TILE_SIZE * 0.82, height, TILE_SIZE * 0.82), facadeMaterial);
       building.position.copy(worldPosition(x, y, height / 2));
       building.castShadow = true;
       building.receiveShadow = true;
-      scene.add(building);
-      const roof = new THREE.Mesh(new THREE.ConeGeometry(TILE_SIZE * 0.56, 0.7, 4), roofMaterial);
+      houseObjects.push(addCityObject(building, 'house'));
+      const roof = new THREE.Mesh(new THREE.ConeGeometry(TILE_SIZE * 0.56, 0.7, 4), roofMaterials[plan.facade?.family === 'wood' ? 0 : 1]);
       roof.position.copy(worldPosition(x, y, height + 0.35));
       roof.rotation.y = Math.PI / 4;
       roof.castShadow = true;
-      scene.add(roof);
+      addCityObject(roof, 'roof');
+
+      for (const window of plan.windows) {
+        const sideIsHorizontal = window.side === 'north' || window.side === 'south';
+        const frame = new THREE.Mesh(sideIsHorizontal ? windowFrameGeometries.northSouth : windowFrameGeometries.eastWest, windowFrameMaterial);
+        const glass = new THREE.Mesh(sideIsHorizontal ? windowGlassGeometries.northSouth : windowGlassGeometries.eastWest, windowGlassMaterial);
+        const frameOffset = TILE_SIZE * 0.82 / 2 + 0.055;
+        const glassOffset = frameOffset + 0.07;
+        const framePosition = worldPosition(x, y, window.height);
+        const glassPosition = worldPosition(x, y, window.height);
+        if (window.side === 'north') { framePosition.z -= frameOffset; glassPosition.z -= glassOffset; }
+        if (window.side === 'south') { framePosition.z += frameOffset; glassPosition.z += glassOffset; }
+        if (window.side === 'east') { framePosition.x += frameOffset; glassPosition.x += glassOffset; }
+        if (window.side === 'west') { framePosition.x -= frameOffset; glassPosition.x -= glassOffset; }
+        if (sideIsHorizontal) {
+          framePosition.x += window.offset;
+          glassPosition.x += window.offset;
+        } else {
+          framePosition.z += window.offset;
+          glassPosition.z += window.offset;
+        }
+        frame.position.copy(framePosition);
+        glass.position.copy(glassPosition);
+        frame.castShadow = true;
+        windowObjects.push(addCityObject(frame, 'window-frame'));
+        windowObjects.push(addCityObject(glass, 'window-glass'));
+      }
 
       const store = STORES.find((candidate) => candidate.buildingTile.x === x && candidate.buildingTile.y === y);
       if (store) {
@@ -100,14 +176,14 @@ for (let y = 0; y < MAP_HEIGHT; y += 1) {
         if (store.doorFacing === 'south') doorPosition.z -= TILE_SIZE * 0.43;
         door.position.copy(doorPosition);
         door.castShadow = true;
-        scene.add(door);
+        addCityObject(door, 'door');
 
         const handle = new THREE.Mesh(new THREE.SphereGeometry(0.11, 8, 8), doorHandleMaterial);
         handle.position.copy(doorPosition);
         if (store.doorFacing === 'east' || store.doorFacing === 'west') handle.position.x += store.doorFacing === 'west' ? 0.13 : -0.13;
         else handle.position.z += store.doorFacing === 'north' ? 0.13 : -0.13;
         handle.position.y -= 0.02;
-        scene.add(handle);
+        addCityObject(handle, 'door-handle');
       }
     }
   }
@@ -115,7 +191,19 @@ for (let y = 0; y < MAP_HEIGHT; y += 1) {
 
 const startMarker = new THREE.Mesh(new THREE.CylinderGeometry(0.62, 0.62, 0.08, 24), markerMaterial);
 startMarker.position.copy(worldPosition(START_STATE.tile.x, START_STATE.tile.y, 0.08));
-scene.add(startMarker);
+addCityObject(startMarker, 'start-marker');
+
+const cityDiagnostics = buildCityDiagnostics({
+  canvas: { created: Boolean(renderer.domElement), context: Boolean(renderer.getContext()) },
+  textures: { cobble: cobbleTexture, brick: brickTexture, wood: woodTexture },
+  materials: { road: roadMaterial, brick: brickMaterial, wood: woodMaterial },
+  floorObjects,
+  houseObjects,
+  windowObjects,
+  decorativeObjects: cityRenderObjects,
+});
+if (cityDiagnostics.status !== 'ok') throw new Error(`City visual initialization failed: ${cityDiagnostics.errors.join('; ')}`);
+(window as Window & { __GASGAME_DIAGNOSTICS__?: CityRenderDiagnostics }).__GASGAME_DIAGNOSTICS__ = cityDiagnostics;
 
 const hud = document.createElement('section');
 hud.className = 'hud';

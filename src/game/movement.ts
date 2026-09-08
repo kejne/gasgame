@@ -1,13 +1,17 @@
 import type { TilePosition } from './map';
 import { isWalkable } from './map';
+import {
+  FACINGS,
+  type Facing,
+  type PlayerState,
+} from './player';
 
-export const FACINGS = ['north', 'east', 'south', 'west'] as const;
-export type Facing = (typeof FACINGS)[number];
-
-export interface PlayerState {
-  readonly tile: TilePosition;
-  readonly facing: Facing;
-}
+export {
+  FACINGS,
+  START_STATE,
+  type Facing,
+  type PlayerState,
+} from './player';
 
 export type MoveIntent = 'forward' | 'backward';
 export type TurnIntent = 'left' | 'right';
@@ -19,13 +23,9 @@ const DELTAS: Record<Facing, TilePosition> = {
   west: { x: -1, y: 0 },
 };
 
-export const START_STATE: PlayerState = {
-  tile: { x: 1, y: 1 },
-  facing: 'east',
-};
-
 export function forwardDelta(facing: Facing): TilePosition {
-  return DELTAS[facing];
+  const delta = DELTAS[facing];
+  return { x: delta.x, y: delta.y };
 }
 
 export function backwardDelta(facing: Facing): TilePosition {
