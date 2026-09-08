@@ -1,0 +1,39 @@
+name: Validate
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.12.x
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install headless browser
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes chromium
+
+      - name: Run complete validation
+        run: npm run validate
+        env:
+          VISUAL_BROWSER_PATH: /usr/bin/chromium
+
+      - name: Upload visual validation artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-smoke-artifacts
+          path: .artifacts/visual-smoke/
+          if-no-files-found: ignore
