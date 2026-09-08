@@ -23,3 +23,5 @@ dist/
 # Visual smoke screenshots and server logs
 .artifacts/visual-smoke/
 /worktrees
+plans/
+github/
